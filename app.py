@@ -66,7 +66,7 @@ with st.sidebar:
     method = st.radio("Ranking method", available)
     k = st.slider("Results", 5, 50, 10)
     st.divider()
-    example = st.selectbox("Or pick a labelled test query", [""] + sorted(test_queries)[:5000],
+    example = st.selectbox("Or pick a labelled test query", [""] + sorted(test_queries),
                            help="Test queries show the ESCI judgment for each result.")
 
 query = st.text_input("Search products", value=example, placeholder="e.g. iphone 13 case")

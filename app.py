@@ -7,13 +7,16 @@ import pandas as pd
 import streamlit as st
 
 from esci.data import ARTIFACTS_DIR, RESULTS_DIR, load_catalog, load_eval_set
+from esci.evaluate import hybrids
 from esci.fusion import rrf
 from esci.metrics import ndcg_at_k, precision_at_k
 from esci.rankers import BM25Ranker, DenseRanker, TfidfRanker
 
 LABEL_NAMES = {"E": "Exact", "S": "Substitute", "C": "Complement", "I": "Irrelevant"}
 LABEL_COLORS = {"E": "#1a7f37", "S": "#9a6700", "C": "#0969da", "I": "#cf222e"}
-METHODS = ["RRF (BM25 + ST)", "RRF (TF-IDF + BM25 + ST)", "BM25", "SentenceTransformer", "TF-IDF"]
+HYBRIDS = hybrids()
+METHODS = ["Weighted RRF (BM25 + ST)", "RRF (BM25 + ST)", "RRF (TF-IDF + BM25 + ST)",
+           "BM25", "SentenceTransformer", "TF-IDF"]
 
 st.set_page_config(page_title="ESCI Product Search", layout="wide")
 
@@ -42,10 +45,10 @@ def load_test_queries():
 
 
 def search(rankers, method: str, query: str, k: int) -> list[tuple[str, float]]:
-    if method.startswith("RRF"):
-        parts = ["BM25", "SentenceTransformer"] + (["TF-IDF"] if "TF-IDF" in method else [])
-        lists = [[pid for pid, _ in rankers[p].search([query], k=100)[0]] for p in parts]
-        fused = rrf(lists, k=60, top_n=k)
+    if method in HYBRIDS:
+        cfg = HYBRIDS[method]
+        lists = [[pid for pid, _ in rankers[p].search([query], k=100)[0]] for p in cfg["parts"]]
+        fused = rrf(lists, k=cfg["k"], weights=cfg["weights"], top_n=k)
         return [(pid, None) for pid in fused]
     return rankers[method].search([query], k=k)[0]
 
@@ -57,7 +60,7 @@ if not rankers:
 products = load_products()
 test_queries = load_test_queries()
 available = [m for m in METHODS
-             if m in rankers or (m.startswith("RRF") and {"BM25", "SentenceTransformer"} <= rankers.keys())]
+             if m in rankers or (m in HYBRIDS and set(HYBRIDS[m]["parts"]) <= rankers.keys())]
 
 st.title("Amazon ESCI Product Search")
 st.caption(f"{len(products):,} products (US locale) · TF-IDF, BM25, Sentence Transformer and RRF hybrid")

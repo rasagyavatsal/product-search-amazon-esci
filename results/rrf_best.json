@@ -1,0 +1,10 @@
+{
+  "weights": [
+    2.0,
+    1.0
+  ],
+  "k": 5,
+  "selected_by": "nDCG@10",
+  "dev_queries": 2000,
+  "dev_split": "train"
+}

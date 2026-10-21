@@ -52,7 +52,55 @@ Products are indexed on `title + brand + color`.
 
 ## Results
 
-RESULTS_PLACEHOLDER
+All 8,956 US test queries, full-catalog retrieval (482K products), top 100.
+Latency is per query on an Apple M1 (8 GB), batched; RRF latency includes
+running its component rankers.
+
+**Strict relevance (Exact = relevant)**
+
+| Method                   |   P@10 | Recall@100 |    MAP | nDCG@10 | Latency (ms/query) |
+|:-------------------------|-------:|-----------:|-------:|--------:|-------------------:|
+| TF-IDF                   | 0.1538 |     0.5096 | 0.1802 |  0.2301 |                1.7 |
+| BM25                     | 0.2071 |     0.5669 | **0.2503** | **0.3196** |            **0.6** |
+| SentenceTransformer      | 0.1710 |     0.5205 | 0.1988 |  0.2633 |                5.7 |
+| RRF (BM25 + ST)          | **0.2079** | **0.6041** | 0.2498 |  0.3195 |                6.3 |
+| RRF (TF-IDF + BM25 + ST) | 0.2037 |     0.5890 | 0.2423 |  0.3112 |                8.0 |
+
+**Lenient relevance (Exact or Substitute = relevant)**
+
+| Method                   |   P@10 | Recall@100 |    MAP | nDCG@10 |
+|:-------------------------|-------:|-----------:|-------:|--------:|
+| TF-IDF                   | 0.2203 |     0.4291 | 0.1700 |  0.2301 |
+| BM25                     | 0.2972 |     0.4851 | 0.2364 | **0.3196** |
+| SentenceTransformer      | 0.2521 |     0.4508 | 0.1943 |  0.2633 |
+| RRF (BM25 + ST)          | **0.3020** | **0.5207** | **0.2427** |  0.3195 |
+| RRF (TF-IDF + BM25 + ST) | 0.2950 |     0.5048 | 0.2331 |  0.3112 |
+
+![Precision-recall curves](results/pr_curve.png)
+
+Full tables are in [`results/metrics.md`](results/metrics.md) and the CSV files
+next to it.
+
+### Findings
+
+- **BM25 is the strongest single ranker** and also the fastest. Compared with
+  TF-IDF it gains about 35% on P@10 and 39% on nDCG@10, thanks to
+  term-frequency saturation and document-length normalisation.
+- **The Sentence Transformer beats TF-IDF but trails BM25.**
+  `all-MiniLM-L6-v2` is a general-purpose model that was not fine-tuned on
+  product search. Shopping queries are full of model numbers, sizes and brand
+  names, where exact token matching matters.
+- **RRF (BM25 + ST) gives the best recall.** Recall@100 rises from 0.567 to
+  0.604 (+6.6%) strict and from 0.485 to 0.521 (+7.3%) lenient. The dense
+  model finds relevant products that BM25 misses. Top-of-list precision (P@10,
+  MAP, nDCG) stays about the same as BM25, because equal-weight fusion with a
+  weaker ranker doesn't improve the first few positions.
+- **Adding TF-IDF to the fusion hurts.** It is highly correlated with BM25 but
+  noisier, so it counts the lexical signal twice and pushes the fused ranking
+  toward the worse lexical ranker.
+- **Possible next steps:** weighted RRF (favouring BM25), a dense model
+  fine-tuned on ESCI training pairs, or a cross-encoder re-ranker over the
+  fused top 100.
 
 ## Usage
 

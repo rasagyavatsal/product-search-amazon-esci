@@ -1,0 +1,3 @@
+Weighted RRF (BM25 + ST) vs BM25, 8,955 queries
+  nDCG@10: +0.0117  95% bootstrap CI [+0.0103, +0.0131]  paired t-test p=8.1e-56  wins/losses/ties 3393/2668/2894
+  MAP: +0.0102  95% bootstrap CI [+0.0089, +0.0115]  paired t-test p=7.0e-54  wins/losses/ties 4165/3162/1628

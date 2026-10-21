@@ -38,7 +38,7 @@ class TfidfRanker:
     def __init__(self, product_ids: list[str], vectorizer: TfidfVectorizer, matrix: sp.csr_matrix):
         self.product_ids = np.asarray(product_ids)
         self.vectorizer = vectorizer
-        self.matrix_t = matrix.T.tocsc()  # (vocab, docs) for fast query @ matrix_t
+        self.matrix_t = matrix.T.tocsr()  # (vocab, docs) for fast csr @ csr products
 
     @classmethod
     def build(cls, product_ids, doc_tokens):

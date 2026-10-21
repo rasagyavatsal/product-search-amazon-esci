@@ -33,7 +33,11 @@ Products are indexed on `title + brand + color`.
 3. **Ranking** (`esci/rankers.py`): TF-IDF cosine, BM25, and dense cosine
    similarity (exact search).
 4. **Hybrid** (`esci/fusion.py`): Reciprocal Rank Fusion,
-   `score(d) = Σ 1 / (60 + rank_i(d))`, over the top 100 of each ranker.
+   `score(d) = Σ w_i / (k + rank_i(d))`, over the top 100 of each ranker.
+   Standard RRF uses w=1 and k=60. **Weighted RRF** (`esci/tune_rrf.py`) picks
+   the BM25 weight and k by grid search on 2,000 *train* queries, selecting by
+   nDCG@10. The result is w_BM25=2, w_ST=1, k=5. The test split is never used
+   for tuning.
 5. **Evaluation** (`esci/evaluate.py`): P@10, Recall@100, MAP@100, nDCG@10,
    11-point interpolated precision-recall curve.
 6. **Search interface** (`app.py`): Streamlit app.
@@ -61,20 +65,22 @@ running its component rankers.
 | Method                   |   P@10 | Recall@100 |    MAP | nDCG@10 | Latency (ms/query) |
 |:-------------------------|-------:|-----------:|-------:|--------:|-------------------:|
 | TF-IDF                   | 0.1538 |     0.5096 | 0.1802 |  0.2301 |                1.7 |
-| BM25                     | 0.2071 |     0.5669 | **0.2503** | **0.3196** |            **0.6** |
+| BM25                     | 0.2071 |     0.5669 | 0.2503 |  0.3196 |            **0.5** |
 | SentenceTransformer      | 0.1710 |     0.5205 | 0.1988 |  0.2633 |                5.7 |
-| RRF (BM25 + ST)          | **0.2079** | **0.6041** | 0.2498 |  0.3195 |                6.3 |
-| RRF (TF-IDF + BM25 + ST) | 0.2037 |     0.5890 | 0.2423 |  0.3112 |                8.0 |
+| RRF (BM25 + ST)          | 0.2079 | **0.6041** | 0.2498 |  0.3195 |                6.2 |
+| RRF (TF-IDF + BM25 + ST) | 0.2037 |     0.5890 | 0.2423 |  0.3112 |                7.9 |
+| **Weighted RRF (BM25 + ST)** | **0.2155** | 0.6013 | **0.2605** | **0.3313** |            6.2 |
 
 **Lenient relevance (Exact or Substitute = relevant)**
 
 | Method                   |   P@10 | Recall@100 |    MAP | nDCG@10 |
 |:-------------------------|-------:|-----------:|-------:|--------:|
 | TF-IDF                   | 0.2203 |     0.4291 | 0.1700 |  0.2301 |
-| BM25                     | 0.2972 |     0.4851 | 0.2364 | **0.3196** |
+| BM25                     | 0.2972 |     0.4851 | 0.2364 |  0.3196 |
 | SentenceTransformer      | 0.2521 |     0.4508 | 0.1943 |  0.2633 |
-| RRF (BM25 + ST)          | **0.3020** | **0.5207** | **0.2427** |  0.3195 |
+| RRF (BM25 + ST)          | 0.3020 | **0.5207** | 0.2427 |  0.3195 |
 | RRF (TF-IDF + BM25 + ST) | 0.2950 |     0.5048 | 0.2331 |  0.3112 |
+| **Weighted RRF (BM25 + ST)** | **0.3096** | 0.5175 | **0.2490** | **0.3313** |
 
 ![Precision-recall curves](results/pr_curve.png)
 
@@ -90,17 +96,27 @@ next to it.
   `all-MiniLM-L6-v2` is a general-purpose model that was not fine-tuned on
   product search. Shopping queries are full of model numbers, sizes and brand
   names, where exact token matching matters.
-- **RRF (BM25 + ST) gives the best recall.** Recall@100 rises from 0.567 to
-  0.604 (+6.6%) strict and from 0.485 to 0.521 (+7.3%) lenient. The dense
-  model finds relevant products that BM25 misses. Top-of-list precision (P@10,
-  MAP, nDCG) stays about the same as BM25, because equal-weight fusion with a
-  weaker ranker doesn't improve the first few positions.
+- **Standard RRF (BM25 + ST) adds recall but not precision.** Recall@100
+  rises from 0.567 to 0.604 (+6.6%) strict, because the dense model finds
+  relevant products that BM25 misses. P@10, MAP and nDCG stay level with BM25:
+  equal-weight fusion with a weaker ranker doesn't improve the first few
+  positions.
+- **Weighted RRF is the best method overall.** Doubling BM25's weight and
+  using a small k (so top ranks dominate) keeps nearly all of the recall gain
+  (0.601 vs 0.567) and also improves the top of the list over BM25:
+  nDCG@10 +3.7%, MAP +4.1%, P@10 +4.1%. The gain is statistically
+  significant. Per-query nDCG@10 rises by +0.0117 (95% bootstrap CI
+  [+0.0103, +0.0131], paired t-test p ≈ 1e-55), and weighted RRF wins on
+  3,393 queries versus 2,668 losses (see
+  [`results/significance.txt`](results/significance.txt)). The tuning
+  landscape is flat around the optimum
+  ([`results/rrf_tuning.csv`](results/rrf_tuning.csv)), so the result isn't
+  sensitive to the exact setting.
 - **Adding TF-IDF to the fusion hurts.** It is highly correlated with BM25 but
   noisier, so it counts the lexical signal twice and pushes the fused ranking
   toward the worse lexical ranker.
-- **Possible next steps:** weighted RRF (favouring BM25), a dense model
-  fine-tuned on ESCI training pairs, or a cross-encoder re-ranker over the
-  fused top 100.
+- **Possible next steps:** a dense model fine-tuned on ESCI training pairs, or
+  a cross-encoder re-ranker over the fused top 100.
 
 ## Usage
 
@@ -117,10 +133,14 @@ cd ..
 # 2. build indexes (catalog, TF-IDF, BM25, embeddings)
 uv run python -m esci.build_index
 
-# 3. evaluate -> results/metrics.md, results/pr_curve.png
-uv run python -m esci.evaluate          # add --max-queries 1000 for a quick run
+# 3. tune weighted RRF on train queries -> results/rrf_best.json
+uv run python -m esci.tune_rrf
 
-# 4. search interface
+# 4. evaluate -> results/metrics.md, results/pr_curve.png
+uv run python -m esci.evaluate          # add --max-queries 1000 for a quick run
+uv run python -m esci.significance      # weighted RRF vs BM25 paired test
+
+# 5. search interface
 uv run streamlit run app.py
 
 # tests
@@ -138,6 +158,8 @@ esci/
   metrics.py      P@k, Recall@k, AP, nDCG, interpolated PR
   build_index.py  builds artifacts/
   evaluate.py     writes results/
+  tune_rrf.py     tunes weighted RRF on train queries
+  significance.py paired significance test between methods
 app.py            Streamlit UI
 tests/            unit tests
 results/          metrics tables + PR curve

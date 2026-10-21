@@ -27,17 +27,31 @@ SETTINGS = {
     "strict": frozenset("E"),        # relevant = Exact
     "lenient": frozenset("ES"),      # relevant = Exact or Substitute
 }
-HYBRIDS = {
-    "RRF (BM25 + ST)": ["BM25", "SentenceTransformer"],
-    "RRF (TF-IDF + BM25 + ST)": ["TF-IDF", "BM25", "SentenceTransformer"],
-}
+RANKERS = [(TfidfRanker, "tfidf"), (BM25Ranker, "bm25"), (DenseRanker, "dense")]
+RRF_BEST_PATH = RESULTS_DIR / "rrf_best.json"
 
 
-def run_rankers(queries: dict[str, str]) -> tuple[dict, dict]:
+def hybrids() -> dict[str, dict]:
+    """Hybrid name -> RRF config. The weighted one is tuned by esci.tune_rrf."""
+    out = {
+        "RRF (BM25 + ST)": {"parts": ["BM25", "SentenceTransformer"], "weights": [1, 1], "k": 60},
+        "RRF (TF-IDF + BM25 + ST)": {"parts": ["TF-IDF", "BM25", "SentenceTransformer"],
+                                     "weights": [1, 1, 1], "k": 60},
+    }
+    if RRF_BEST_PATH.exists():
+        best = json.loads(RRF_BEST_PATH.read_text())
+        out["Weighted RRF (BM25 + ST)"] = {"parts": ["BM25", "SentenceTransformer"],
+                                           "weights": best["weights"], "k": best["k"]}
+    return out
+
+
+def run_base_rankers(queries: dict[str, str], names: set[str] | None = None) -> tuple[dict, dict]:
     qids, texts = list(queries), list(queries.values())
     runs, latency = {}, {}
-    for cls, sub in [(TfidfRanker, "tfidf"), (BM25Ranker, "bm25"), (DenseRanker, "dense")]:
+    for cls, sub in RANKERS:
         path = ARTIFACTS_DIR / sub
+        if names is not None and cls.name not in names:
+            continue
         if not path.exists():
             print(f"skipping {cls.name}: no index at {path}")
             continue
@@ -48,12 +62,19 @@ def run_rankers(queries: dict[str, str]) -> tuple[dict, dict]:
         runs[cls.name] = {q: [pid for pid, _ in h] for q, h in zip(qids, hits)}
         print(f"{cls.name}: {latency[cls.name]:.2f} ms/query", flush=True)
         del ranker
+    return runs, latency
 
-    for name, parts in HYBRIDS.items():
+
+def run_rankers(queries: dict[str, str]) -> tuple[dict, dict]:
+    runs, latency = run_base_rankers(queries)
+    qids = list(queries)
+    for name, cfg in hybrids().items():
+        parts = cfg["parts"]
         if not all(p in runs for p in parts):
             continue
         t = time.perf_counter()
-        runs[name] = {q: rrf([runs[p][q] for p in parts], k=60, top_n=K) for q in qids}
+        runs[name] = {q: rrf([runs[p][q] for p in parts], k=cfg["k"], top_n=K,
+                             weights=cfg["weights"]) for q in qids}
         fusion_ms = (time.perf_counter() - t) / len(qids) * 1000
         latency[name] = sum(latency[p] for p in parts) + fusion_ms
     return runs, latency

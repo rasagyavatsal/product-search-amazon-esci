@@ -1,0 +1,14 @@
+# data & build artifacts
+data/
+artifacts/
+*.parquet
+*.npy
+*.faiss
+*.pkl
+
+# python
+__pycache__/
+*.pyc
+.venv/
+.ipynb_checkpoints/
+.DS_Store
